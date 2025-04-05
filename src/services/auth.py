@@ -4,12 +4,13 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from jose import JWTError, jwt
 
 from src.database.db import get_db
-from src.conf.config import config
+from src.conf.config import config as app_config
 from src.services.users import UserService
+
 
 class Hash:
     pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -20,6 +21,7 @@ class Hash:
     def get_password_hash(self, password: str):
         return self.pwd_context.hash(password)
 
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
@@ -28,15 +30,18 @@ async def create_access_token(data: dict, expires_delta: Optional[int] = None):
     if expires_delta:
         expire = datetime.now(UTC) + timedelta(seconds=expires_delta)
     else:
-        expire = datetime.now(UTC) + timedelta(seconds=config.JWT_EXPIRATION_SECONDS)
+        expire = datetime.now(UTC) + timedelta(
+            seconds=app_config.JWT_EXPIRATION_SECONDS
+        )
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(
-        to_encode, config.JWT_SECRET, algorithm=config.JWT_ALGORITHM
+        to_encode, app_config.JWT_SECRET, algorithm=app_config.JWT_ALGORITHM
     )
     return encoded_jwt
 
+
 async def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)
 ):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -46,7 +51,7 @@ async def get_current_user(
 
     try:
         payload = jwt.decode(
-            token, config.JWT_SECRET, algorithms=[config.JWT_ALGORITHM]
+            token, app_config.JWT_SECRET, algorithms=[app_config.JWT_ALGORITHM]
         )
         username = payload["sub"]
         if username is None:
@@ -58,4 +63,3 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     return user
-
