@@ -30,9 +30,7 @@ async def create_access_token(data: dict, expires_delta: Optional[int] = None):
     if expires_delta:
         expire = datetime.now(UTC) + timedelta(seconds=expires_delta)
     else:
-        expire = datetime.now(UTC) + timedelta(
-            seconds=app_config.JWT_EXPIRATION_SECONDS
-        )
+        expire = datetime.now(UTC) + timedelta(seconds=app_config.JWT_EXPIRATION_TIME)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(
         to_encode, app_config.JWT_SECRET, algorithm=app_config.JWT_ALGORITHM
@@ -58,8 +56,10 @@ async def get_current_user(
             raise credentials_exception
     except JWTError as e:
         raise credentials_exception
+
     user_service = UserService(db)
     user = await user_service.get_user_by_username(username)
+
     if user is None:
         raise credentials_exception
     return user
