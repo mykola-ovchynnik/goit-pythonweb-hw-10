@@ -30,7 +30,9 @@ async def create_access_token(data: dict, expires_delta: Optional[int] = None):
     if expires_delta:
         expire = datetime.now(UTC) + timedelta(seconds=expires_delta)
     else:
-        expire = datetime.now(UTC) + timedelta(seconds=app_config.JWT_EXPIRATION_TIME)
+        expire = datetime.now(UTC) + timedelta(
+            seconds=int(app_config.JWT_EXPIRATION_TIME)
+        )
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(
         to_encode, app_config.JWT_SECRET, algorithm=app_config.JWT_ALGORITHM
