@@ -11,6 +11,30 @@ from src.database.models import Contact, User
 from src.schemas import ContactCreate, ContactUpdate
 
 
+def _birthday_filter_conditions(today, future_date):
+    if today.month == future_date.month:
+        return and_(
+            extract("month", Contact.birthday) == today.month,
+            extract("day", Contact.birthday) >= today.day,
+            extract("day", Contact.birthday) <= future_date.day,
+        )
+    else:
+        return or_(
+            and_(
+                extract("month", Contact.birthday) == today.month,
+                extract("day", Contact.birthday) >= today.day,
+            ),
+            and_(
+                extract("month", Contact.birthday) == future_date.month,
+                extract("day", Contact.birthday) <= future_date.day,
+            ),
+            and_(
+                extract("month", Contact.birthday) > today.month,
+                extract("month", Contact.birthday) < future_date.month,
+            ),
+        )
+
+
 class ContactRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -29,33 +53,22 @@ class ContactRepository:
         existing_contact = existing_contact_result.scalar_one_or_none()
 
         if existing_contact:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Contact with email {contact_data.email} already exists.",
-            )
+            raise ValueError(f"Contact with email {contact_data.email} already exists.")
 
         contact = Contact(**contact_data.model_dump(exclude_unset=True), user=user)
         self.db.add(contact)
-
-        try:
-            await self.db.commit()
-            await self.db.refresh(contact)
-            return contact
-        except IntegrityError:
-            await self.db.rollback()
-            raise HTTPException(
-                status_code=400,
-                detail=f"Contact with email {contact_data.email} already exists.",
-            )
+        await self.db.commit()
+        await self.db.refresh(contact)
+        return contact
 
     async def get_contacts(
         self,
-        user: User,
         skip: int = 0,
         limit: int = 100,
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
         email: Optional[str] = None,
+        user: User = None,
     ):
         stmt = select(Contact).filter_by(user=user)
 
@@ -72,7 +85,9 @@ class ContactRepository:
 
         stmt = stmt.offset(skip).limit(limit)
 
-        total_count_stmt = select(func.count()).select_from(Contact)
+        total_count_stmt = (
+            select(func.count()).select_from(Contact).filter_by(user=user)
+        )
         if filters:
             total_count_stmt = total_count_stmt.where(and_(*filters))
 
@@ -96,31 +111,23 @@ class ContactRepository:
     ) -> Optional[Contact]:
         contact = await self.get_contact_by_id(contact_id, user)
         if contact is None:
-            raise HTTPException(status_code=404, detail="Contact not found")
+            raise ValueError("Contact not found")
 
         for key, value in contact_data.model_dump(exclude_unset=True).items():
             setattr(contact, key, value)
 
-        try:
-            await self.db.commit()
-            await self.db.refresh(contact)
-            return contact
-        except IntegrityError:
-            await self.db.rollback()
-            raise HTTPException(status_code=400, detail="Failed to update contact.")
+        await self.db.commit()
+        await self.db.refresh(contact)
+        return contact
 
     async def delete_contact(self, contact_id: int, user: User) -> Optional[Contact]:
         contact = await self.get_contact_by_id(contact_id, user)
         if contact is None:
-            raise HTTPException(status_code=404, detail="Contact not found")
+            raise ValueError("Contact not found")
 
-        try:
-            await self.db.delete(contact)
-            await self.db.commit()
-            return contact
-        except IntegrityError:
-            await self.db.rollback()
-            raise HTTPException(status_code=400, detail="Failed to delete contact.")
+        await self.db.delete(contact)
+        await self.db.commit()
+        return contact
 
     async def search_contacts(self, query: str, user: User) -> Sequence[Contact]:
         stmt = select(Contact).filter(
@@ -141,24 +148,11 @@ class ContactRepository:
     ):
         today = date.today()
         future_date = today + timedelta(days=days)
+        conditions = _birthday_filter_conditions(today, future_date)
 
         stmt = (
             select(Contact)
-            .filter(
-                and_(
-                    Contact.user_id == user.id,
-                    or_(
-                        and_(
-                            extract("month", Contact.birthday) == today.month,
-                            extract("day", Contact.birthday) >= today.day,
-                        ),
-                        and_(
-                            extract("month", Contact.birthday) == future_date.month,
-                            extract("day", Contact.birthday) <= future_date.day,
-                        ),
-                    ),
-                )
-            )
+            .filter(Contact.user_id == user.id, conditions)
             .offset(skip)
             .limit(limit)
         )
@@ -166,16 +160,7 @@ class ContactRepository:
         total_count_stmt = (
             select(func.count())
             .select_from(Contact)
-            .filter(
-                (
-                    (extract("month", Contact.birthday) == today.month)
-                    & (extract("day", Contact.birthday) >= today.day)
-                )
-                | (
-                    (extract("month", Contact.birthday) == future_date.month)
-                    & (extract("day", Contact.birthday) <= future_date.day)
-                )
-            )
+            .filter(Contact.user_id == user.id, conditions)
         )
 
         total_count = await self._execute_and_count(total_count_stmt)
