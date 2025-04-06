@@ -24,6 +24,10 @@ class Config(BaseSettings):
     USE_CREDENTIALS: bool = True
     VALIDATE_CERTS: bool = True
 
+    CLOUDINARY_NAME: str = os.getenv("CLOUDINARY_NAME")
+    CLOUDINARY_API_KEY: str = os.getenv("CLOUDINARY_API_KEY")
+    CLOUDINARY_API_SECRET: str = os.getenv("CLOUDINARY_API_SECRET")
+
     model_config = ConfigDict(extra="ignore")
 
 
